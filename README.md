@@ -1,1 +1,1 @@
-# sturdy-invention
+# for my own study
