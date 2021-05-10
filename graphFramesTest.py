@@ -36,4 +36,6 @@ print(g)
 
 from igraph import *
 ig = Graph.TupleList(g.edges.collect(), directed=True)
+visual_style = {}
+visual_style["margin"] = 20
 plot(ig)
