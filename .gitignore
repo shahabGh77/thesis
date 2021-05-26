@@ -1,3 +1,5 @@
 *.csv
 test.py
 test.txt
+*.log
+metastore_db
