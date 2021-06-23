@@ -4,4 +4,4 @@ test.txt
 *.log
 metastore_db
 data/
-
+reports/
