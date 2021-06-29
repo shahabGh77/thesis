@@ -4,3 +4,4 @@ test.py
 metastore_db
 data/
 reports/
+__pycache__/
