@@ -26,9 +26,9 @@ def authsUpdate(V, E):
     return authsNormalisation(tmp)
 
 
-def HITS(V, E, iteration, writeToFile=False):
-    hubs  = V.withColumn('h_score', lit(1))
-    auths = V.withColumn('a_score', lit(0))
+def HITS(V, E, iteration, hubs=None, auths=None, writeToFile=False):
+    if not hubs: hubs  = V.withColumn('h_score', lit(1))
+    if not auths: auths = V.withColumn('a_score', lit(0))
 
     for i in range(iteration):
         auths = authsUpdate(hubs, E)

@@ -3,5 +3,5 @@ test.py
 *.log
 metastore_db
 data/
-reports/
+reports/*
 __pycache__/
