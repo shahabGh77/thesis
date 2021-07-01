@@ -1,10 +1,10 @@
 from pyspark.sql.functions import col, lit, when
 
-# from pyspark import SparkContext
-# sc = SparkContext("local", "First App")
+from pyspark import SparkContext
+sc = SparkContext("local", "First App")
 
-# from pyspark.sql import SQLContext
-# sqlContext = SQLContext(sc)
+from pyspark.sql import SQLContext
+sqlContext = SQLContext(sc)
 
 
 def hubsNormalisation(V):
@@ -44,36 +44,25 @@ def HITS(V, E, iteration, hubs=None, auths=None, writeToFile=False):
 
 
 
-# vertices = sqlContext.createDataFrame([
-#     ('A', ),
-#     ('B', ),
-#     ('C', ),
-#     ('D', ),
-#     ('E', )], ["id", ])
+vertices = sqlContext.createDataFrame([
+    ('A', ),
+    ('B', ),
+    ('C', ),
+    ('D', ),
+    ('E', )], ["id", ])
 
 
-# edges = sqlContext.createDataFrame([
-#     ('A', 'B'),
-#     ('A', 'C'),
-#     ('A', 'D'),
-#     ('B', 'A'),
-#     ('B', 'D'),
-#     ('C', 'E'),
-#     ('D', 'B'),
-#     ('D', 'C')], ["src", "dst", ])
+edges = sqlContext.createDataFrame([
+    ('A', 'B'),
+    ('A', 'C'),
+    ('A', 'D'),
+    ('B', 'A'),
+    ('B', 'D'),
+    ('C', 'E'),
+    ('D', 'B'),
+    ('D', 'C')], ["src", "dst", ])
 
+hubs, auths = HITS(vertices, edges, 5)
 
-# hubs, auths = HITS(vertices, edges, 5)
-
-# hubs.show()
-# auths.show()
-
-# print('yesssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss')
-# g = GraphFrame(vertices, edges)
-# print(g)
-
-# from igraph import Graph, plot
-# ig = Graph.TupleList(g.edges.collect(), directed=True)
-# visual_style = {}
-# visual_style["margin"] = 70
-# plot(ig)
+hubs.show()
+auths.show()
