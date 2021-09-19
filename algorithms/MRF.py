@@ -6,8 +6,6 @@ from pyspark.sql import SparkSession
 import numpy as np
 import time
 
-# from mGraph import mGraph
-
 
 sc = SparkContext.getOrCreate()
 spark = SparkSession.builder.getOrCreate()
@@ -18,9 +16,9 @@ class MRF:
     def __init__(self, V, E):
         self.V = V
         self.E = E
-        self.Fi = 2
-        #potential functions
         self.epsilon = 0.1
+        self.base = 10
+        #potential functions
         self.si = {                                                 #  epssilon=.1 =>    +     bad good
             '+': np.array([[1-2*self.epsilon, 2*self.epsilon],      #                  fraud   .8  .2
                            [self.epsilon, 1-self.epsilon]]),        #                  honest  .1  .9
@@ -35,50 +33,87 @@ class MRF:
                 self.V = self.V.withColumn(f'{name}={value}', lit(defaultProb))
             elif on == 'edge':
                 self.E = self.E.withColumn(f'{name}={value}', lit(defaultProb))
-
+    
     def initBP(self):
         self.E = self.E.withColumn('Mij[fraud]', lit(1))
         self.E = self.E.withColumn('Mij[honest]', lit(1))
         self.E = self.E.withColumn('Mji[bad]', lit(1))
         self.E = self.E.withColumn('Mji[good]', lit(1))
 
+        self.E = self.E.withColumn('Fi[fraud]', lit(2))
+        self.E = self.E.withColumn('Fi[honest]', lit(2))
+        self.E = self.E.withColumn('Fi[bad]', lit(2))
+        self.E = self.E.withColumn('Fi[good]', lit(2))
+        
         self.V = self.V.withColumn('Fi[fraud]', lit(2))
         self.V = self.V.withColumn('Fi[honest]', lit(2))
         self.V = self.V.withColumn('Fi[bad]', lit(2))
         self.V = self.V.withColumn('Fi[good]', lit(2))
+
+    def updateFi(self, df):
+        eClms = self.E.columns
+        vClms = self.V.columns
+        df = df.withColumnRenamed('src', 'ssrc').withColumnRenamed('dst', 'ddst')       
+
+        # users
+        self.E = self.E.join(df.groupBy('ssrc').agg(sqlsum('count').alias('ucount')), self.E.src == df.ssrc, 'leftouter') \
+                       .withColumn('Fi[fraud]', when(col('ucount').isNull(), col('Fi[fraud]')).otherwise(col('Fi[fraud]')*col('ucount')))
+
+        self.V = self.V.join(df.groupBy('ssrc').agg(sqlsum('count').alias('ucount')), self.V.id == df.ssrc, 'leftouter') \
+                       .withColumn('Fi[fraud]', when(col('ucount').isNull(), col('Fi[fraud]')).otherwise(col('Fi[fraud]')*col('ucount')))
+        # products
+        self.E = self.E.join(df.groupBy('ddst').agg(sqlsum('count').alias('pcount')), self.E.dst == df.ddst, 'leftouter') \
+                       .withColumn('Fi[bad]', when(col('pcount').isNull(), col('Fi[bad]')).otherwise(col('Fi[bad]')*col('pcount'))).select(eClms)
+
+        self.V = self.V.join(df.groupBy('ddst').agg(sqlsum('count').alias('pcount')), self.V.id == df.ddst, 'leftouter') \
+                       .withColumn('Fi[bad]', when(col('pcount').isNull(), col('Fi[bad]')).otherwise(col('Fi[bad]')*col('pcount'))).select(vClms)
+
+
 
     def MUL(self, df, groupByField, columnsAndAliases):
         exprs = [exp(sqlsum(log(x))).alias(y) for x, y in columnsAndAliases]
         df = df.groupBy(groupByField).agg(*exprs)
         return df
 
-    def selectSi(self, column):
+    def preDot(self, column):
         if 'bad' in column:
             si = {'+': self.si['+'][:, 0], '-':self.si['-'][:, 0]}
+            firstCol, secondCol = 'nfraud', 'nhonest'
         elif 'good' in column:
             si = {'+': self.si['+'][:, 1], '-':self.si['-'][:, 1]}
+            firstCol, secondCol = 'nfraud', 'nhonest'
         elif 'fraud' in column:
             si = {'+': self.si['+'][0], '-':self.si['-'][0]}
+            firstCol, secondCol = 'nbad', 'ngood'
         elif 'honest' in column:
             si = {'+': self.si['+'][1], '-':self.si['-'][1]}
-        return si
+            firstCol, secondCol = 'nbad', 'ngood'
+        return si, firstCol, secondCol
 
 
     def dot(self, df, columns):
         for column in columns:
-            si = self.selectSi(column)
+            si, firstCol, secondCol = self.preDot(column)
+            FiFirst, FiSecond = f'Fi[{firstCol[1:]}]', f'Fi[{secondCol[1:]}]'
             df = df.withColumn(column, when(col('sign') >= 0,
-                                          col('sign')*(self.Fi*col('nfraud')*si['+'][0] + self.Fi*col('nhonest')*si['+'][1])) 
-                                          .otherwise( sqlabs('sign')*(self.Fi*col('nfraud')*si['-'][0] + self.Fi*col('nhonest')*si['-'][1])))
+                                          col('sign')*(col(FiFirst)*col(firstCol)*si['+'][0] + col(FiSecond)*col(secondCol)*si['+'][1])) 
+                                          .otherwise( sqlabs('sign')*(col(FiFirst)*col(firstCol)*si['-'][0] + col(FiSecond)*col(secondCol)*si['-'][1])))
         return df
         
-    def normaliser(self, df, columns):
+    def rowNormaliser(self, df, columns, base=1):
         cl = [col(c) for c in columns]
         nsum = [cl[i]+cl[i+1] for i in range(len(cl)-1)][-1]
-        df = df.withColumn('nsum', col('Mji[bad]')+col('Mji[good]'))
+        df = df.withColumn('nsum', nsum)
         for column in columns:
-            df = df.withColumn(column, col(column) / col('nsum'))
+            df = df.withColumn(column, base * col(column) / col('nsum'))
         return df
+
+    def colNormaliser(self, df, columns):
+        for column, alias in columns:
+            maxVal = df.agg({column: 'max'}).collect()[0][0]
+            df = df.withColumn(alias, col(column)/maxVal)
+        return df
+
 
     def u2pMsg(self):
         """user to product message
@@ -126,16 +161,12 @@ class MRF:
         moreThan1NeighbourIds = self.E.groupBy(self.E.src).count().where('count > 1').withColumnRenamed('src', 'id').drop('count')
         moreThan1Neighbour = self.E.join(moreThan1NeighbourIds, self.E.src == moreThan1NeighbourIds.id).select(self.E.columns)
         prods = self.MUL(moreThan1Neighbour, 'src', [('Mij[fraud]', 'nfraud'), ('Mij[honest]', 'nhonest')]).withColumnRenamed('src', 'id')
-        
         del moreThan1Neighbour, moreThan1NeighbourIds
-        
         prods = self.E.join(prods, self.E.src == prods.id)
         prods = prods.withColumn('nfraud', col('nfraud')/col('Mij[fraud]')).withColumn('nhonest', col('nhonest')/col('Mij[honest]'))
         unormal = self.dot(prods, ['Mji[bad]', 'Mji[good]'])
-
         del prods
-        normal = self.normaliser(unormal, ['Mji[bad]', 'Mji[good]'])
-        
+        normal = self.rowNormaliser(unormal, ['Mji[bad]', 'Mji[good]'])
         del unormal
         diffIds = self.E.select('src', 'dst').subtract(normal.select('src', 'dst')).withColumnRenamed('src', 'srcc').withColumnRenamed('dst', 'dstt')
         diff = self.E.join(diffIds, (self.E.src == diffIds.srcc) & (self.E.dst == diffIds.dstt)).select(self.E.columns)
@@ -150,24 +181,13 @@ class MRF:
         self.E.cache()
         moreThan1NeighbourIds = self.E.groupBy(self.E.dst).count().where('count > 1').withColumnRenamed('dst', 'id').drop('count')
         moreThan1Neighbour = self.E.join(moreThan1NeighbourIds, self.E.dst == moreThan1NeighbourIds.id).select(self.E.columns)
-        prods = moreThan1Neighbour.groupBy('dst') \
-                .agg(exp(sqlsum(log('Mji[bad]'))).alias('nbad'), exp(sqlsum(log('Mji[good]'))).alias('ngood')) \
-                .withColumnRenamed('dst', 'id')
+        prods = self.MUL(moreThan1Neighbour, 'dst', [('Mji[bad]', 'nbad'), ('Mji[good]', 'ngood')]).withColumnRenamed('dst', 'id')    
         del moreThan1Neighbour, moreThan1NeighbourIds
         prods = self.E.join(prods, self.E.dst == prods.id)
         prods = prods.withColumn('nbad', col('nbad')/col('Mji[bad]')).withColumn('ngood', col('ngood')/col('Mji[good]'))
-        unormal = prods.withColumn('Mij[fraud]',
-                                     when(col('sign') >= 0,
-                                          col('sign')*(self.Fi*col('nbad')*0.8 + self.Fi*col('ngood')*0.2))
-                                          .otherwise( sqlabs('sign')*(self.Fi*col('nbad')*0.2 + self.Fi*col('ngood')*0.8) )) \
-                       .withColumn('Mij[honest]',
-                                    when(col('sign') >= 0,
-                                         col('sign')*(self.Fi*col('nbad')*0.1 + self.Fi*col('ngood')*0.9)) 
-                                         .otherwise( sqlabs('sign')*(self.Fi*col('nbad')*0.9 + self.Fi*col('ngood')*0.1)) )
+        unormal = self.dot(prods, ['Mij[fraud]', 'Mij[honest]'])
         del prods
-        normal = unormal.withColumn('psum', col('Mij[fraud]')+col('Mij[honest]')) \
-                        .withColumn('Mij[fraud]', col('Mij[fraud]') / col('psum')) \
-                        .withColumn('Mij[honest]', col('Mij[honest]') / col('psum'))
+        normal = self.rowNormaliser(unormal, ['Mij[fraud]', 'Mij[honest]'])
         del unormal
         diffIds = self.E.select('src', 'dst').subtract(normal.select('src', 'dst')).withColumnRenamed('src', 'srcc').withColumnRenamed('dst', 'dstt')
         diff = self.E.join(diffIds, (self.E.src == diffIds.srcc) & (self.E.dst == diffIds.dstt)).select(self.E.columns)
@@ -176,66 +196,82 @@ class MRF:
 
     def spBelief(self):
         clms = self.V.columns
-        unormalU = self.E.groupBy('src') \
-                .agg(exp(sqlsum(log('Mij[fraud]'))).alias('P[fraud]'), exp(sqlsum(log('Mij[honest]'))).alias('P[honest]')) \
-                .withColumn('P[fraud]', self.Fi*col('P[fraud]')) \
-                .withColumn('P[honest]', self.Fi*col('P[honest]'))
-        normalU = unormalU.withColumn('usum', col('P[fraud]')+col('P[honest]')) \
-                          .withColumn('P[fraud]', col('P[fraud]') / col('usum')) \
-                          .withColumn('P[honest]', col('P[honest]') / col('usum'))        
-        self.V = self.V.join(normalU, self.V.id == normalU.src, 'leftouter')
-        unormalP = self.E.groupBy('dst') \
-                .agg(exp(sqlsum(log('Mji[bad]'))).alias('P[bad]'), exp(sqlsum(log('Mji[good]'))).alias('P[good]')) \
-                .withColumn('P[bad]', self.Fi*col('P[bad]')) \
-                .withColumn('P[good]', self.Fi*col('P[good]'))
-        normalP = unormalP.withColumn('psum', col('P[bad]')+col('P[good]')) \
-                          .withColumn('P[bad]', col('P[bad]') / col('psum')) \
-                          .withColumn('P[good]', col('P[good]') / col('psum')) 
-        clms.extend(['P[fraud]', 'P[honest]', 'P[bad]', 'P[good]'])
-        self.V = self.V.join(normalP, self.V.id == normalP.dst, 'leftouter').select(clms)
+        self.V = self.V.drop('P[fraud]').drop('P[honest]').drop('P[bad]').drop('P[good]')
+        unormalU = self.MUL(self.E, 'src', [('Mij[fraud]', 'P[fraud]'), ('Mij[honest]', 'P[honest]')])
+        self.V = self.V.join(unormalU, self.V.id == unormalU.src, 'leftouter').withColumn('P[fraud]', col('Fi[fraud]')*col('P[fraud]')) \
+                                                                            .withColumn('P[honest]', col('Fi[honest]')*col('P[honest]'))
+        self.V = self.colNormaliser(self.V, [('P[fraud]', 'fFac'), ('P[honest]', 'hFac')])
+        self.V = self.rowNormaliser(self.V, ['P[fraud]', 'P[honest]'])
+
+        unormalP = self.MUL(self.E, 'dst', [('Mji[bad]', 'P[bad]'), ('Mji[good]', 'P[good]')])
+        if not 'P[bad]' in clms:
+            clms.extend(['P[fraud]', 'P[honest]', 'P[bad]', 'P[good]', 'fFac', 'hFac', 'bFac', 'gFac'])
+
+        self.V = self.V.join(unormalP, self.V.id == unormalP.dst, 'leftouter').withColumn('P[bad]', col('Fi[bad]')*col('P[bad]')) \
+                                                                            .withColumn('P[good]', col('Fi[good]')*col('P[good]'))     
+        self.V = self.colNormaliser(self.V, [('P[bad]', 'bFac'), ('P[good]', 'gFac')])                                        
+        self.V = self.rowNormaliser(self.V, ['P[bad]', 'P[good]']).select(clms)
+
+        
 
 
 def firstRun():
     V = spark.read.parquet('../data/videoGames_Vertices.parquet')
-    E = spark.read.parquet('../data/videoGames_Edges.parquet')
+    E = spark.read.parquet('../data/videoGames_Edges_Sentiment.parquet')
+    E = E.select('src', 'dst', 'overall', 'verified', 'vote', 'reviewText', col('compound').alias('sign'))
+    moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
     m = MRF(V, E)
     m.initBP()
+    m.updateFi(moreThan1Review)
+
     m.u2pMsg()
-    m.E.show()
+    # m.E.show()
+    m.p2uMsg()
+    return m
+    # m.spBelief()
+    # # m.E.show()
+    # m.V.filter(col('P[fraud]').isNull() & col('P[bad]').isNull()).show()
+    # m.V.filter(m.V.id == 'A71Z5AIGEFK11').show()
+    print('\n\n\n\n\n')
+    # m.E.filter(m.E.src == 'A71Z5AIGEFK11').show()
 
-
-
-
-def mrfIterrate(iteration):
+def messagePassing(iteration):
     V = spark.read.parquet('../data/videoGames_Vertices.parquet')
-    
+    E = spark.read.parquet('../data/videoGames_Edges_Sentiment.parquet')
+    E = E.select('src', 'dst', 'overall', 'verified', 'vote', 'reviewText', col('compound').alias('sign'))
+    moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
+    m = MRF(V, E)
+    m.initBP()
+    m.updateFi(moreThan1Review)
+
     for i in range(iteration):
-        E = spark.read.parquet(f'../data/MRF-E{i+1}.parquet')
-        m = MRF(V, E)
         start_time = time.time()
         m.u2pMsg()
         m.p2uMsg()
-        m.E.write.parquet(f'../data/MRF-E{i+2}.parquet')
+        m.E.write.parquet(f'../data/MRF/MRF-E{i}.parquet')
+        print(f"\n---iteration {i+1} ===> {time.time() - start_time} seconds ---\n")
         del m
         spark.catalog.clearCache()
-        print(f"\n\n\n---iteration {i+1} ===> {time.time() - start_time} seconds ---\n\n\n")
-
-
-def blf(iteration):
-    for i in range(iteration):
-        V = spark.read.parquet('../data/videoGames_Vertices.parquet')
-        E = spark.read.parquet(f'../data/MRF-E{i+1}.parquet')
+        E = spark.read.parquet(f'../data/MRF/MRF-E{i}.parquet')
         m = MRF(V, E)
+        
+
+def beliefExtraction(iteration):
+    V = spark.read.parquet('../data/videoGames_Vertices.parquet')
+    E = spark.read.parquet(f'../data/MRF/MRF-E0.parquet')
+    moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
+    m = MRF(V, E)
+    m.initBP()
+    m.updateFi(moreThan1Review)
+
+    for i in range(iteration-1):
         start_time = time.time()
         m.spBelief()
-        m.V.write.parquet(f'../data/MRF-V{i+1}.parquet')
+        m.V.write.parquet(f'../data/MRF/MRF-V{i}.parquet')
+
         del m
         spark.catalog.clearCache()
-        print(f"\n\n---iteration {i+1} ===> {time.time() - start_time} seconds ---\n\n")
-
-
-# E = spark.read.parquet('../data/MRF/MRF-E1.parquet')
-# m = MRF(1, E)
-# m.normaliser(m.E, ['Mij[fraud]', 'Mij[honest]']).show()
-# m.E.show()
-firstRun()
+        print(f"\n---iteration {i+1} ===> {time.time() - start_time} seconds ---\n")
+        E = spark.read.parquet(f'../data/MRF/MRF-E{i+1}.parquet')
+        V = spark.read.parquet(f'../data/MRF/MRF-V{i}.parquet')
+        m = MRF(V, E)
