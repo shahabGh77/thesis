@@ -18,6 +18,7 @@ class MRF:
         self.E = E
         self.epsilon = 0.1
         self.base = 10
+        self.sampleSize = 100
         #potential functions
         self.si = {                                                 #  epssilon=.1 =>    +     bad good
             '+': np.array([[1-2*self.epsilon, 2*self.epsilon],      #                  fraud   .8  .2
@@ -158,19 +159,20 @@ class MRF:
 
         """
         self.E.cache()
-        moreThan1NeighbourIds = self.E.groupBy(self.E.src).count().where('count > 1').withColumnRenamed('src', 'id').drop('count')
-        moreThan1Neighbour = self.E.join(moreThan1NeighbourIds, self.E.src == moreThan1NeighbourIds.id).select(self.E.columns)
-        prods = self.MUL(moreThan1Neighbour, 'src', [('Mij[fraud]', 'nfraud'), ('Mij[honest]', 'nhonest')]).withColumnRenamed('src', 'id')
-        del moreThan1Neighbour, moreThan1NeighbourIds
+        # moreThan1NeighbourIds = self.E.groupBy(self.E.src).count().where('count > 1').withColumnRenamed('src', 'id').drop('count')
+        # moreThan1Neighbour = self.E.join(moreThan1NeighbourIds, self.E.src == moreThan1NeighbourIds.id).select(self.E.columns)
+        prods = self.MUL(self.E, 'src', [('Mij[fraud]', 'nfraud'), ('Mij[honest]', 'nhonest')]).withColumnRenamed('src', 'id')
+        # del moreThan1Neighbour, moreThan1NeighbourIds
         prods = self.E.join(prods, self.E.src == prods.id)
         prods = prods.withColumn('nfraud', col('nfraud')/col('Mij[fraud]')).withColumn('nhonest', col('nhonest')/col('Mij[honest]'))
         unormal = self.dot(prods, ['Mji[bad]', 'Mji[good]'])
         del prods
         normal = self.rowNormaliser(unormal, ['Mji[bad]', 'Mji[good]'])
+        self.E = normal.select(self.E.columns)
         del unormal
-        diffIds = self.E.select('src', 'dst').subtract(normal.select('src', 'dst')).withColumnRenamed('src', 'srcc').withColumnRenamed('dst', 'dstt')
-        diff = self.E.join(diffIds, (self.E.src == diffIds.srcc) & (self.E.dst == diffIds.dstt)).select(self.E.columns)
-        self.E = normal.select(self.E.columns).union(diff)
+        # diffIds = self.E.select('src', 'dst').subtract(normal.select('src', 'dst')).withColumnRenamed('src', 'srcc').withColumnRenamed('dst', 'dstt')
+        # diff = self.E.join(diffIds, (self.E.src == diffIds.srcc) & (self.E.dst == diffIds.dstt)).select(self.E.columns)
+        # self.E = normal.select(self.E.columns).union(diff)
 
 
     def p2uMsg(self):
@@ -179,19 +181,20 @@ class MRF:
         logic: it's like u2pMsg()
         """
         self.E.cache()
-        moreThan1NeighbourIds = self.E.groupBy(self.E.dst).count().where('count > 1').withColumnRenamed('dst', 'id').drop('count')
-        moreThan1Neighbour = self.E.join(moreThan1NeighbourIds, self.E.dst == moreThan1NeighbourIds.id).select(self.E.columns)
-        prods = self.MUL(moreThan1Neighbour, 'dst', [('Mji[bad]', 'nbad'), ('Mji[good]', 'ngood')]).withColumnRenamed('dst', 'id')    
-        del moreThan1Neighbour, moreThan1NeighbourIds
+        # moreThan1NeighbourIds = self.E.groupBy(self.E.dst).count().where('count > 1').withColumnRenamed('dst', 'id').drop('count')
+        # moreThan1Neighbour = self.E.join(moreThan1NeighbourIds, self.E.dst == moreThan1NeighbourIds.id).select(self.E.columns)
+        prods = self.MUL(self.E, 'dst', [('Mji[bad]', 'nbad'), ('Mji[good]', 'ngood')]).withColumnRenamed('dst', 'id')    
+        # del moreThan1Neighbour, moreThan1NeighbourIds
         prods = self.E.join(prods, self.E.dst == prods.id)
         prods = prods.withColumn('nbad', col('nbad')/col('Mji[bad]')).withColumn('ngood', col('ngood')/col('Mji[good]'))
         unormal = self.dot(prods, ['Mij[fraud]', 'Mij[honest]'])
         del prods
         normal = self.rowNormaliser(unormal, ['Mij[fraud]', 'Mij[honest]'])
+        self.E = normal.select(self.E.columns)
         del unormal
-        diffIds = self.E.select('src', 'dst').subtract(normal.select('src', 'dst')).withColumnRenamed('src', 'srcc').withColumnRenamed('dst', 'dstt')
-        diff = self.E.join(diffIds, (self.E.src == diffIds.srcc) & (self.E.dst == diffIds.dstt)).select(self.E.columns)
-        self.E = normal.select(self.E.columns).union(diff)
+        # diffIds = self.E.select('src', 'dst').subtract(normal.select('src', 'dst')).withColumnRenamed('src', 'srcc').withColumnRenamed('dst', 'dstt')
+        # diff = self.E.join(diffIds, (self.E.src == diffIds.srcc) & (self.E.dst == diffIds.dstt)).select(self.E.columns)
+        # self.E = normal.select(self.E.columns).union(diff)
 
 
     def spBelief(self):
@@ -238,7 +241,7 @@ def firstRun():
 def messagePassing(iteration):
     V = spark.read.parquet('../data/videoGames_Vertices.parquet')
     E = spark.read.parquet('../data/videoGames_Edges_Sentiment.parquet')
-    E = E.select('src', 'dst', 'overall', 'verified', 'vote', 'reviewText', col('compound').alias('sign'))
+    E = E.select('src', 'dst', 'overall', 'verified', 'vote', 'reviewText', 'unixReviewTime', col('compound').alias('sign'))
     moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
     m = MRF(V, E)
     m.initBP()
