@@ -18,6 +18,7 @@ class MRF:
         self.E = E
         self.epsilon = 0.1
         self.base = 10
+        self.sampleSize = 100
         #potential functions
         self.si = {                                                 #  epssilon=.1 =>    +     bad good
             '+': np.array([[1-2*self.epsilon, 2*self.epsilon],      #                  fraud   .8  .2
@@ -26,6 +27,8 @@ class MRF:
                            [1-self.epsilon, self.epsilon]])         #                  fraud   .2  .8
         }                                                           #                  honest  .9  .1
 
+        self.moreThan1ProductNeighbour = self.E.groupBy(self.E.src).count().where('count > 1').withColumnRenamed('src', 'id')
+        self.moreThan1UserNeighbour = self.E.groupBy(self.E.dst).count().where('count > 1').withColumnRenamed('dst', 'id')
 
     def addRandomVariable(self, name, values, defaultProb, on='vertex'):
         for value in values:
@@ -49,6 +52,16 @@ class MRF:
         self.V = self.V.withColumn('Fi[honest]', lit(2))
         self.V = self.V.withColumn('Fi[bad]', lit(2))
         self.V = self.V.withColumn('Fi[good]', lit(2))
+
+    def repartitionEdges(self):
+        self.E = self.E.join(self.moreThan1ProductNeighbour.drop('count'), col('src') == col('id'), 'leftouter') \
+                       .withColumn('mt1p', when(col('id').isNull(), lit(False)).otherwise(lit(True))).drop('id')
+        
+        self.E = self.E.join(self.moreThan1UserNeighbour.drop('count'), col('dst') == col('id'), 'leftouter') \
+                       .withColumn('mt1u', when(col('id').isNull(), lit(False)).otherwise(lit(True))).drop('id')
+
+        self.E = self.E.repartition('mt1p', 'mt1u')
+
 
     def updateFi(self, df):
         eClms = self.E.columns
