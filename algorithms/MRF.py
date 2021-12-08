@@ -64,13 +64,15 @@ class MRF:
         self.V = self.V.withColumn('Fi[good]', lit(2))
 
     def repartitionEdges(self):
-        self.E = self.E.join(self.moreThan1ProductNeighbour.drop('count'), col('src') == col('id'), 'leftouter') \
-                       .withColumn('mt1p', when(col('id').isNull(), lit(False)).otherwise(lit(True))).drop('id')
+        self.E = self.E.join(self.moreThan1ProductNeighbour.select('id', 'count'), col('src') == col('id'), 'leftouter') \
+                       .withColumn('mt1p', when(col('id').isNull(), lit(False)).otherwise(lit(True))) \
+                       .withColumn('pDeg', when(col('id').isNull(), lit(1)).otherwise(col('count'))).drop('id', 'count')
         
-        self.E = self.E.join(self.moreThan1UserNeighbour.drop('count'), col('dst') == col('id'), 'leftouter') \
-                       .withColumn('mt1u', when(col('id').isNull(), lit(False)).otherwise(lit(True))).drop('id')
+        self.E = self.E.join(self.moreThan1UserNeighbour.select('id', 'count'), col('dst') == col('id'), 'leftouter') \
+                       .withColumn('mt1u', when(col('id').isNull(), lit(False)).otherwise(lit(True))).drop('id') \
+                       .withColumn('uDeg', when(col('id').isNull(), lit(1)).otherwise(col('count'))).drop('id', 'count')
 
-        self.E = self.E.repartition('mt1p', 'mt1u')
+        self.E = self.E.repartition('mt1p', 'mt1u', 'pDeg', 'uDeg')
 
 
     def updateFi(self, df):
