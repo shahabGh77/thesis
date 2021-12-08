@@ -1,4 +1,3 @@
-from _typeshed import Self
 from pyspark.sql.functions import col, when, lit, sum as sqlsum, exp, log, abs as sqlabs
 from pyspark.sql import functions as F
 from pyspark import SparkContext
@@ -20,6 +19,7 @@ class MRF:
         self.epsilon = 0.1
         self.base = 10
         self.sampleSize = 500
+        self.maxDeg = 1000
         #potential functions
         self.si = {                                                 #  epssilon=.1 =>    +     bad good
             '+': np.array([[1-2*self.epsilon, 2*self.epsilon],      #                  fraud   .8  .2
@@ -62,6 +62,7 @@ class MRF:
         self.V = self.V.withColumn('Fi[honest]', lit(2))
         self.V = self.V.withColumn('Fi[bad]', lit(2))
         self.V = self.V.withColumn('Fi[good]', lit(2))
+        self.repartitionEdges()
 
     def repartitionEdges(self):
         self.E = self.E.join(self.moreThan1ProductNeighbour.select('id', 'count'), col('src') == col('id'), 'leftouter') \
@@ -69,7 +70,7 @@ class MRF:
                        .withColumn('pDeg', when(col('id').isNull(), lit(1)).otherwise(col('count'))).drop('id', 'count')
         
         self.E = self.E.join(self.moreThan1UserNeighbour.select('id', 'count'), col('dst') == col('id'), 'leftouter') \
-                       .withColumn('mt1u', when(col('id').isNull(), lit(False)).otherwise(lit(True))).drop('id') \
+                       .withColumn('mt1u', when(col('id').isNull(), lit(False)).otherwise(lit(True))) \
                        .withColumn('uDeg', when(col('id').isNull(), lit(1)).otherwise(col('count'))).drop('id', 'count')
 
         self.E = self.E.repartition('mt1p', 'mt1u', 'pDeg', 'uDeg')
@@ -139,6 +140,26 @@ class MRF:
             df = df.withColumn(alias, col(column)/maxVal)
         return df
 
+    def takeSample(self, sampleGroups, sampleIdx, space):
+        fracDict = sampleGroups.toPandas().set_index('id').to_dict()['ratio']
+        return space.sampleBy(sampleIdx, fractions=fracDict)
+
+    def getEdges(self, groupByField):
+        if groupByField == 'src':
+            mt1Col = 'mt1p'
+            degCol = 'pDeg'
+            sampleGroups = self.moreThan1ProductNeighbour.select('id', 'ratio')
+        elif groupByField == 'dst':
+            mt1Col = 'mt1u'
+            degCol = 'uDeg'
+            sampleGroups = self.moreThan1UserNeighbour.select('id', 'ratio')
+
+        moreThan1Neighbour = self.E.filter(col(mt1Col) == True)
+        normalSelected = moreThan1Neighbour.filter(col(degCol) < self.maxDeg)
+        sampleSpace = moreThan1Neighbour.filter(col(degCol) > self.maxDeg)
+        sampleGroups = sampleGroups.filter(col('count') > self.maxDeg)
+        sampleSelected = self.takeSample(sampleGroups, groupByField, sampleSpace)
+        return normalSelected.union(sampleSelected)
 
     def u2pMsg(self):
         """user to product message
@@ -203,7 +224,7 @@ class MRF:
         logic: it's like u2pMsg()
         """
         self.E.cache()
-        moreThan1Neighbour = self.E.filter(col('mt1u') == True)
+        moreThan1Neighbour = self.getEdges('dst')
         prods = self.MUL(moreThan1Neighbour, 'dst', [('Mji[bad]', 'nbad'), ('Mji[good]', 'ngood')]).withColumnRenamed('dst', 'id')    
         del moreThan1Neighbour
         prods = self.E.join(prods, self.E.dst == prods.id)
