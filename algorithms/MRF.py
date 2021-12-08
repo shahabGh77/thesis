@@ -1,3 +1,4 @@
+from _typeshed import Self
 from pyspark.sql.functions import col, when, lit, sum as sqlsum, exp, log, abs as sqlabs
 from pyspark.sql import functions as F
 from pyspark import SparkContext
@@ -18,7 +19,7 @@ class MRF:
         self.E = E
         self.epsilon = 0.1
         self.base = 10
-        self.sampleSize = 100
+        self.sampleSize = 500
         #potential functions
         self.si = {                                                 #  epssilon=.1 =>    +     bad good
             '+': np.array([[1-2*self.epsilon, 2*self.epsilon],      #                  fraud   .8  .2
@@ -26,9 +27,18 @@ class MRF:
             '-': np.array([[2*self.epsilon, 1-2*self.epsilon],      #                    -     bad good
                            [1-self.epsilon, self.epsilon]])         #                  fraud   .2  .8
         }                                                           #                  honest  .9  .1
+        self.moreThan1ProductNeighbour, self.moreThan1UserNeighbour = self.findMoreThan1Neighbours()
+        
+    def findMoreThan1Neighbours(self):
+        moreThan1ProductNeighbour = self.E.groupBy(self.E.src).count().where('count > 1') \
+                                              .withColumnRenamed('src', 'id').withColumn('ratio', self.sampleSize/col('count'))
+        moreThan1ProductNeighbour = moreThan1ProductNeighbour.repartition('count')
 
-        self.moreThan1ProductNeighbour = self.E.groupBy(self.E.src).count().where('count > 1').withColumnRenamed('src', 'id')
-        self.moreThan1UserNeighbour = self.E.groupBy(self.E.dst).count().where('count > 1').withColumnRenamed('dst', 'id')
+        moreThan1UserNeighbour = self.E.groupBy(self.E.dst).count().where('count > 1') \
+                                            .withColumnRenamed('dst', 'id').withColumn('ratio', self.sampleSize/col('count'))
+        moreThan1UserNeighbour = moreThan1UserNeighbour.repartition('count')
+
+        return moreThan1ProductNeighbour, moreThan1UserNeighbour    
 
     def addRandomVariable(self, name, values, defaultProb, on='vertex'):
         for value in values:
