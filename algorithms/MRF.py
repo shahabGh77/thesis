@@ -79,20 +79,16 @@ class MRF:
     def updateFi(self, df):
         eClms = self.E.columns
         vClms = self.V.columns
-        df = df.withColumnRenamed('src', 'ssrc').withColumnRenamed('dst', 'ddst')       
+        df = df.withColumnRenamed('src', 'ssrc').withColumnRenamed('dst', 'ddst').drop('unixReviewTime')       
 
-        # users
-        self.E = self.E.join(df.groupBy('ssrc').agg(sqlsum('count').alias('ucount')), self.E.src == df.ssrc, 'leftouter') \
-                       .withColumn('Fi[fraud]', when(col('ucount').isNull(), col('Fi[fraud]')).otherwise(col('Fi[fraud]')*col('ucount')))
+        self.E = self.E.join(df, ((self.E.dst == df.ddst) & (self.E.src == df.ssrc)), 'leftouter') \
+                       .withColumn('Fi[bad]', when(col('count').isNull(), col('Fi[bad]')).otherwise(col('Fi[bad]')*col('count'))) \
+                       .withColumn('Fi[fraud]', when(col('count').isNull(), col('Fi[fraud]')).otherwise(col('Fi[fraud]')*col('count'))) \
+                       .select(eClms)
 
-        self.V = self.V.join(df.groupBy('ssrc').agg(sqlsum('count').alias('ucount')), self.V.id == df.ssrc, 'leftouter') \
-                       .withColumn('Fi[fraud]', when(col('ucount').isNull(), col('Fi[fraud]')).otherwise(col('Fi[fraud]')*col('ucount')))
-        # products
-        self.E = self.E.join(df.groupBy('ddst').agg(sqlsum('count').alias('pcount')), self.E.dst == df.ddst, 'leftouter') \
-                       .withColumn('Fi[bad]', when(col('pcount').isNull(), col('Fi[bad]')).otherwise(col('Fi[bad]')*col('pcount'))).select(eClms)
-
-        self.V = self.V.join(df.groupBy('ddst').agg(sqlsum('count').alias('pcount')), self.V.id == df.ddst, 'leftouter') \
-                       .withColumn('Fi[bad]', when(col('pcount').isNull(), col('Fi[bad]')).otherwise(col('Fi[bad]')*col('pcount'))).select(vClms)
+        self.V = self.V.join(df, self.V.id == df.ssrc, 'leftouter') \
+                       .withColumn('Fi[fraud]', when(col('count').isNull(), col('Fi[fraud]')).otherwise(col('Fi[fraud]')*col('count'))) \
+                       .select(vClms)
 
 
 
@@ -308,13 +304,15 @@ def beliefExtraction(iteration):
     m.initBP()
     m.updateFi(moreThan1Review)
 
-    for i in range(iteration-1):
+    for i in range(iteration):
         start_time = time.time()
         m.spBelief()
         m.V.write.parquet(f'../data/MRF/MRF-V{i}.parquet')
 
         del m
         spark.catalog.clearCache()
+        if i+1 == iteration:
+            break
         print(f"\n---iteration {i+1} ===> {time.time() - start_time} seconds ---\n")
         E = spark.read.parquet(f'../data/MRF/MRF-E{i+1}.parquet')
         V = spark.read.parquet(f'../data/MRF/MRF-V{i}.parquet')
