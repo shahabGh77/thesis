@@ -208,6 +208,7 @@ class MRF:
         unormal = self.dot(prods, ['Mji[bad]', 'Mji[good]'])
         del prods
         normal = self.rowNormaliser(unormal, ['Mji[bad]', 'Mji[good]'])
+        self.E = normal.select(self.E.columns)
         del unormal
 
         lessThan1Neighbour = self.E.filter(col('mt1p') == False)
@@ -228,6 +229,7 @@ class MRF:
         unormal = self.dot(prods, ['Mij[fraud]', 'Mij[honest]'])
         del prods
         normal = self.rowNormaliser(unormal, ['Mij[fraud]', 'Mij[honest]'])
+        self.E = normal.select(self.E.columns)
         del unormal
 
         lessThan1Neighbour = self.E.filter(col('mt1u') == False)
@@ -278,7 +280,7 @@ def firstRun():
 def messagePassing(iteration):
     V = spark.read.parquet('../data/videoGames_Vertices.parquet')
     E = spark.read.parquet('../data/videoGames_Edges_Sentiment.parquet')
-    E = E.select('src', 'dst', 'overall', 'verified', 'vote', 'reviewText', col('compound').alias('sign'))
+    E = E.select('src', 'dst', 'overall', 'verified', 'vote', 'reviewText', 'unixReviewTime', col('compound').alias('sign'))
     moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
     m = MRF(V, E)
     m.initBP()
