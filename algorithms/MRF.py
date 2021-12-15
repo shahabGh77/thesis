@@ -117,7 +117,7 @@ class MRF:
         for column in columns:
             si, firstCol, secondCol = self.preDot(column)
             FiFirst, FiSecond = f'Fi[{firstCol[1:]}]', f'Fi[{secondCol[1:]}]'
-            df = df.withColumn(column, when(col('sign') >= 0,
+            df = df.withColumn(column, when(col('sign') > 0,
                                           col('sign')*(col(FiFirst)*col(firstCol)*si['+'][0] + col(FiSecond)*col(secondCol)*si['+'][1])) 
                                           .otherwise( sqlabs('sign')*(col(FiFirst)*col(firstCol)*si['-'][0] + col(FiSecond)*col(secondCol)*si['-'][1])))
         return df
