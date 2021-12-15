@@ -113,13 +113,18 @@ class MRF:
         return si, firstCol, secondCol
 
 
-    def dot(self, df, columns):
+    def dot(self, df, columns, signEffect):
         for column in columns:
             si, firstCol, secondCol = self.preDot(column)
             FiFirst, FiSecond = f'Fi[{firstCol[1:]}]', f'Fi[{secondCol[1:]}]'
-            df = df.withColumn(column, when(col('sign') > 0,
+            if signEffect:
+                df = df.withColumn(column, when(col('sign') > 0,
                                           col('sign')*(col(FiFirst)*col(firstCol)*si['+'][0] + col(FiSecond)*col(secondCol)*si['+'][1])) 
                                           .otherwise( sqlabs('sign')*(col(FiFirst)*col(firstCol)*si['-'][0] + col(FiSecond)*col(secondCol)*si['-'][1])))
+            else:
+                df = df.withColumn(column, when(col('sign') > 0,
+                                          col(FiFirst)*col(firstCol)*si['+'][0] + col(FiSecond)*col(secondCol)*si['+'][1]) 
+                                          .otherwise( col(FiFirst)*col(firstCol)*si['-'][0] + col(FiSecond)*col(secondCol)*si['-'][1]))
         return df
         
     def rowNormaliser(self, df, columns, base=1):
@@ -157,7 +162,7 @@ class MRF:
         sampleSelected = self.takeSample(sampleGroups, groupByField, sampleSpace)
         return normalSelected.union(sampleSelected)
 
-    def u2pMsg(self):
+    def u2pMsg(self, signEffect=True):
         """user to product message
 
         logic:                              
@@ -205,7 +210,7 @@ class MRF:
         del moreThan1Neighbour
         prods = self.E.join(prods, self.E.src == prods.id)
         prods = prods.withColumn('nfraud', col('nfraud')/col('Mij[fraud]')).withColumn('nhonest', col('nhonest')/col('Mij[honest]'))
-        unormal = self.dot(prods, ['Mji[bad]', 'Mji[good]'])
+        unormal = self.dot(prods, ['Mji[bad]', 'Mji[good]'], signEffect)
         del prods
         normal = self.rowNormaliser(unormal, ['Mji[bad]', 'Mji[good]'])
         self.E = normal.select(self.E.columns)
@@ -215,7 +220,7 @@ class MRF:
         self.E = normal.select(self.E.columns).union(lessThan1Neighbour)
 
 
-    def p2uMsg(self):
+    def p2uMsg(self, signEffect=True):
         """product to user message
 
         logic: it's like u2pMsg()
@@ -226,7 +231,7 @@ class MRF:
         del moreThan1Neighbour
         prods = self.E.join(prods, self.E.dst == prods.id)
         prods = prods.withColumn('nbad', col('nbad')/col('Mji[bad]')).withColumn('ngood', col('ngood')/col('Mji[good]'))
-        unormal = self.dot(prods, ['Mij[fraud]', 'Mij[honest]'])
+        unormal = self.dot(prods, ['Mij[fraud]', 'Mij[honest]'], signEffect)
         del prods
         normal = self.rowNormaliser(unormal, ['Mij[fraud]', 'Mij[honest]'])
         self.E = normal.select(self.E.columns)
