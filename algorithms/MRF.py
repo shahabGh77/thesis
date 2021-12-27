@@ -66,14 +66,14 @@ class MRF:
 
     def repartitionEdges(self):
         self.E = self.E.join(self.moreThan1ProductNeighbour.select('id', 'count'), col('src') == col('id'), 'leftouter') \
-                       .withColumn('mt1p', when(col('id').isNull(), lit(False)).otherwise(lit(True))) \
-                       .withColumn('pDeg', when(col('id').isNull(), lit(1)).otherwise(col('count'))).drop('id', 'count')
+                       .withColumn('scu', when(col('id').isNull(), lit(True)).otherwise(lit(False))) \
+                       .withColumn('uDeg', when(col('id').isNull(), lit(1)).otherwise(col('count'))).drop('id', 'count')
         
         self.E = self.E.join(self.moreThan1UserNeighbour.select('id', 'count'), col('dst') == col('id'), 'leftouter') \
-                       .withColumn('mt1u', when(col('id').isNull(), lit(False)).otherwise(lit(True))) \
-                       .withColumn('uDeg', when(col('id').isNull(), lit(1)).otherwise(col('count'))).drop('id', 'count')
+                       .withColumn('scp', when(col('id').isNull(), lit(True)).otherwise(lit(False))) \
+                       .withColumn('pDeg', when(col('id').isNull(), lit(1)).otherwise(col('count'))).drop('id', 'count')
 
-        self.E = self.E.repartition('mt1p', 'mt1u', 'pDeg', 'uDeg')
+        self.E = self.E.repartition('scu', 'scp', 'uDeg', 'pDeg')
 
 
     def updateFi(self, df):
@@ -147,15 +147,15 @@ class MRF:
 
     def getEdges(self, groupByField):
         if groupByField == 'src':
-            mt1Col = 'mt1p'
-            degCol = 'pDeg'
+            scCol = 'scu'
+            degCol = 'uDeg'
             sampleGroups = self.moreThan1ProductNeighbour.select('id', 'ratio')
         elif groupByField == 'dst':
-            mt1Col = 'mt1u'
-            degCol = 'uDeg'
+            scCol = 'scp'
+            degCol = 'pDeg'
             sampleGroups = self.moreThan1UserNeighbour.select('id', 'ratio')
 
-        moreThan1Neighbour = self.E.filter(col(mt1Col) == True)
+        moreThan1Neighbour = self.E.filter(col(scCol) == False)
         normalSelected = moreThan1Neighbour.filter(col(degCol) < self.maxDeg)
         sampleSpace = moreThan1Neighbour.filter(col(degCol) > self.maxDeg)
         sampleGroups = sampleGroups.filter(col('count') > self.maxDeg)
@@ -205,7 +205,7 @@ class MRF:
 
         """
         self.E.cache()
-        moreThan1Neighbour = self.E.filter(col('mt1p') == True)
+        moreThan1Neighbour = self.E.filter(col('scu') == False)
         prods = self.MUL(moreThan1Neighbour, 'src', [('Mij[fraud]', 'nfraud'), ('Mij[honest]', 'nhonest')]).withColumnRenamed('src', 'id')
         del moreThan1Neighbour
         prods = self.E.join(prods, self.E.src == prods.id)
@@ -216,7 +216,7 @@ class MRF:
         self.E = normal.select(self.E.columns)
         del unormal
 
-        lessThan1Neighbour = self.E.filter(col('mt1p') == False)
+        lessThan1Neighbour = self.E.filter(col('scu') == True)
         self.E = normal.select(self.E.columns).union(lessThan1Neighbour)
 
 
@@ -237,7 +237,7 @@ class MRF:
         self.E = normal.select(self.E.columns)
         del unormal
 
-        lessThan1Neighbour = self.E.filter(col('mt1u') == False)
+        lessThan1Neighbour = self.E.filter(col('scp') == True)
         self.E = normal.select(self.E.columns).union(lessThan1Neighbour)
 
 
