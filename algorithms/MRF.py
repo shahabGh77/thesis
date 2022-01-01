@@ -20,6 +20,7 @@ class MRF:
         self.base = 10
         self.sampleSize = 500
         self.maxDeg = 1000
+        self.signCol = 's'
         #potential functions
         self.si = {                                                 #  epssilon=.1 =>    +     bad good
             '+': np.array([[1-2*self.epsilon, 2*self.epsilon],      #                  fraud   .8  .2
@@ -30,14 +31,13 @@ class MRF:
         self.moreThan1ProductNeighbour, self.moreThan1UserNeighbour = self.findMoreThan1Neighbours()
         
     def findMoreThan1Neighbours(self):
-        moreThan1ProductNeighbour = self.E.groupBy(self.E.src).count().where('count > 1') \
-                                              .withColumnRenamed('src', 'id').withColumn('ratio', self.sampleSize/col('count'))
-        moreThan1ProductNeighbour = moreThan1ProductNeighbour.repartition('count')
+        moreThan1ProductNeighbour = self.V.filter((col('type') == 'u') & (col('deg') > 1)) \
+                                            .withColumn('ratio', self.sampleSize/col('deg')) \
+                                            .select('id', 'ratio', 'deg').cache().repartition('deg')
 
-        moreThan1UserNeighbour = self.E.groupBy(self.E.dst).count().where('count > 1') \
-                                            .withColumnRenamed('dst', 'id').withColumn('ratio', self.sampleSize/col('count'))
-        moreThan1UserNeighbour = moreThan1UserNeighbour.repartition('count')
-
+        moreThan1UserNeighbour = self.V.filter((col('type') == 'p') & (col('deg') > 1)) \
+                                        .withColumn('ratio', self.sampleSize/col('deg')) \
+                                        .select('id', 'ratio', 'deg').cache().repartition('deg')
         return moreThan1ProductNeighbour, moreThan1UserNeighbour    
 
     def addRandomVariable(self, name, values, defaultProb, on='vertex'):
@@ -113,16 +113,16 @@ class MRF:
         return si, firstCol, secondCol
 
 
-    def dot(self, df, columns, signEffect):
+    def dot(self, df, columns, signMagEffect):
         for column in columns:
             si, firstCol, secondCol = self.preDot(column)
             FiFirst, FiSecond = f'Fi[{firstCol[1:]}]', f'Fi[{secondCol[1:]}]'
-            if signEffect:
-                df = df.withColumn(column, when(col('sign') > 0,
-                                          col('sign')*(col(FiFirst)*col(firstCol)*si['+'][0] + col(FiSecond)*col(secondCol)*si['+'][1])) 
-                                          .otherwise( sqlabs('sign')*(col(FiFirst)*col(firstCol)*si['-'][0] + col(FiSecond)*col(secondCol)*si['-'][1])))
+            if signMagEffect:
+                df = df.withColumn(column, when(col(self.signCol) > 0,
+                                          col(self.signCol)*(col(FiFirst)*col(firstCol)*si['+'][0] + col(FiSecond)*col(secondCol)*si['+'][1])) 
+                                          .otherwise( sqlabs(self.signCol)*(col(FiFirst)*col(firstCol)*si['-'][0] + col(FiSecond)*col(secondCol)*si['-'][1])))
             else:
-                df = df.withColumn(column, when(col('sign') > 0,
+                df = df.withColumn(column, when(col(self.signCol) > 0,
                                           col(FiFirst)*col(firstCol)*si['+'][0] + col(FiSecond)*col(secondCol)*si['+'][1]) 
                                           .otherwise( col(FiFirst)*col(firstCol)*si['-'][0] + col(FiSecond)*col(secondCol)*si['-'][1]))
         return df
@@ -148,21 +148,23 @@ class MRF:
     def getEdges(self, groupByField):
         if groupByField == 'src':
             scCol = 'scu'
-            degCol = 'uDeg'
-            sampleGroups = self.moreThan1ProductNeighbour.select('id', 'ratio')
+            degCol = 'udeg'
+            sampleGroups = self.moreThan1ProductNeighbour.filter(col('deg') >= self.maxDeg).select('id', 'ratio')
         elif groupByField == 'dst':
             scCol = 'scp'
-            degCol = 'pDeg'
-            sampleGroups = self.moreThan1UserNeighbour.select('id', 'ratio')
+            degCol = 'pdeg'
+            sampleGroups = self.moreThan1UserNeighbour.filter(col('deg') >= self.maxDeg).select('id', 'ratio')
 
-        moreThan1Neighbour = self.E.filter(col(scCol) == False)
-        normalSelected = moreThan1Neighbour.filter(col(degCol) < self.maxDeg)
-        sampleSpace = moreThan1Neighbour.filter(col(degCol) > self.maxDeg)
-        sampleGroups = sampleGroups.filter(col('count') > self.maxDeg)
-        sampleSelected = self.takeSample(sampleGroups, groupByField, sampleSpace)
+        moreThan1Neighbour = self.E.filter(col(scCol) == False) # work with edges that their groupByField side has more than 1 neighbour
+        normalSelected = moreThan1Neighbour.filter(col(degCol) < self.maxDeg)       # edges with deg < MAX_DEG are selected normally
+        sampleSpace = moreThan1Neighbour.filter(col(degCol) >= self.maxDeg)          # we take a sample from edges with deg >= MAX_DEG
+
+        if sampleSpace.rdd.isEmpty():
+            return normalSelected
+        sampleSelected = self.takeSample(sampleGroups, groupByField, sampleSpace)   #take a sample
         return normalSelected.union(sampleSelected)
 
-    def u2pMsg(self, signEffect=True):
+    def u2pMsg(self, signMagEffect=True):
         """user to product message
 
         logic:                              
@@ -205,22 +207,21 @@ class MRF:
 
         """
         self.E.cache()
-        moreThan1Neighbour = self.E.filter(col('scu') == False)
+        moreThan1Neighbour = self.getEdges('src')
         prods = self.MUL(moreThan1Neighbour, 'src', [('Mij[fraud]', 'nfraud'), ('Mij[honest]', 'nhonest')]).withColumnRenamed('src', 'id')
         del moreThan1Neighbour
         prods = self.E.join(prods, self.E.src == prods.id)
         prods = prods.withColumn('nfraud', col('nfraud')/col('Mij[fraud]')).withColumn('nhonest', col('nhonest')/col('Mij[honest]'))
-        unormal = self.dot(prods, ['Mji[bad]', 'Mji[good]'], signEffect)
+        unormal = self.dot(prods, ['Mji[bad]', 'Mji[good]'], signMagEffect)
         del prods
-        normal = self.rowNormaliser(unormal, ['Mji[bad]', 'Mji[good]'])
-        self.E = normal.select(self.E.columns)
+        normal = self.rowNormaliser(unormal, ['Mji[bad]', 'Mji[good]']).select(self.E.columns)
         del unormal
 
         lessThan1Neighbour = self.E.filter(col('scu') == True)
-        self.E = normal.select(self.E.columns).union(lessThan1Neighbour)
+        self.E = normal.union(lessThan1Neighbour)
 
 
-    def p2uMsg(self, signEffect=True):
+    def p2uMsg(self, signMagEffect=True):
         """product to user message
 
         logic: it's like u2pMsg()
@@ -231,14 +232,13 @@ class MRF:
         del moreThan1Neighbour
         prods = self.E.join(prods, self.E.dst == prods.id)
         prods = prods.withColumn('nbad', col('nbad')/col('Mji[bad]')).withColumn('ngood', col('ngood')/col('Mji[good]'))
-        unormal = self.dot(prods, ['Mij[fraud]', 'Mij[honest]'], signEffect)
+        unormal = self.dot(prods, ['Mij[fraud]', 'Mij[honest]'], signMagEffect)
         del prods
-        normal = self.rowNormaliser(unormal, ['Mij[fraud]', 'Mij[honest]'])
-        self.E = normal.select(self.E.columns)
+        normal = self.rowNormaliser(unormal, ['Mij[fraud]', 'Mij[honest]']).select(self.E.columns)
         del unormal
 
         lessThan1Neighbour = self.E.filter(col('scp') == True)
-        self.E = normal.select(self.E.columns).union(lessThan1Neighbour)
+        self.E = normal.union(lessThan1Neighbour)
 
 
     def spBelief(self):
@@ -283,13 +283,12 @@ def firstRun():
     # m.E.filter(m.E.src == 'A71Z5AIGEFK11').show()
 
 def messagePassing(iteration):
-    V = spark.read.parquet('../data/videoGames_Vertices.parquet')
-    E = spark.read.parquet('../data/videoGames_Edges_Sentiment.parquet')
-    E = E.select('src', 'dst', 'overall', 'verified', 'vote', 'reviewText', 'unixReviewTime', col('compound').alias('sign'))
-    moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
+    V = spark.read.parquet('../data/videoGames_VerticesLBP.parquet')
+    E = spark.read.parquet('../data/videoGames_EdgesLBP.parquet')
+    
+    # moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
     m = MRF(V, E)
-    m.initBP()
-    m.updateFi(moreThan1Review)
+    # m.updateFi(moreThan1Review)
 
     for i in range(iteration):
         start_time = time.time()
@@ -304,12 +303,11 @@ def messagePassing(iteration):
         
 
 def beliefExtraction(iteration):
-    V = spark.read.parquet('../data/videoGames_Vertices.parquet')
+    V = spark.read.parquet('../data/videoGames_VerticesLBP.parquet')
     E = spark.read.parquet(f'../data/MRF/MRF-E0.parquet')
-    moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
+    # moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
     m = MRF(V, E)
-    m.initBP()
-    m.updateFi(moreThan1Review)
+    # m.updateFi(moreThan1Review)
 
     for i in range(iteration):
         start_time = time.time()
