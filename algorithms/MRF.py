@@ -3,6 +3,7 @@ from pyspark.sql import functions as F
 from pyspark import SparkContext
 from pyspark.sql import SQLContext
 from pyspark.sql import SparkSession
+from glob import glob
 import numpy as np
 import time
 
@@ -322,3 +323,22 @@ def beliefExtraction(iteration):
         E = spark.read.parquet(f'../data/MRF/MRF-E{i+1}.parquet')
         V = spark.read.parquet(f'../data/MRF/MRF-V{i}.parquet')
         m = MRF(V, E)
+
+def convergence(path):
+    results = sorted(glob(path))
+    report = {'columns': ['Fm', 'Hm', 'Bm', 'Gm']}
+    for i, res in enumerate(results):
+        e = spark.read.parquet(res)
+        d = e.agg(F.sum('Mij[fraud]').alias('F'), F.sum('Mij[honest]').alias('H'),
+                    F.sum('Mji[bad]').alias('B'), F.sum('Mji[good]').alias('G')).first().asDict()
+
+        report[f'MRF{i}'] = list(d.values())
+        if i != 0:
+            report[f'Diff{i}, {i-1}'] = [x2-x1 for (x2, x1) in zip(od, d.values())]
+        od = d.values()
+    return report
+
+def convergencePrint(path):
+    res = convergence(path)
+    for k, v in res.items():
+        print(k, ': ', v)
