@@ -3,9 +3,11 @@ from pyspark.sql import functions as F
 from pyspark import SparkContext
 from pyspark.sql import SQLContext
 from pyspark.sql import SparkSession
+from pathlib import Path
 from glob import glob
 import numpy as np
 import time
+import random
 
 
 sc = SparkContext.getOrCreate()
@@ -14,13 +16,13 @@ sqlContext = SQLContext.getOrCreate(sc)
 
 
 class MRF:
-    def __init__(self, V, E):
+    def __init__(self, V, E, maxDeg=None, sampleSize=None):
         self.V = V
         self.E = E
         self.epsilon = 0.1
         self.base = 10
-        self.sampleSize = 500
-        self.maxDeg = 1000
+        self.maxDeg = 1000 if maxDeg is None else maxDeg
+        self.sampleSize = 500 if sampleSize is None else sampleSize
         self.signCol = 's'
         #potential functions
         self.si = {                                                 #  epssilon=.1 =>    +     bad good
@@ -245,19 +247,20 @@ class MRF:
     def spBelief(self):
         clms = self.V.columns
         self.V = self.V.drop('P[fraud]').drop('P[honest]').drop('P[bad]').drop('P[good]')
-        unormalU = self.MUL(self.E, 'src', [('Mij[fraud]', 'P[fraud]'), ('Mij[honest]', 'P[honest]')])
+        unormalU = self.MUL(self.getEdges('src'), 'src', [('Mij[fraud]', 'P[fraud]'), ('Mij[honest]', 'P[honest]')])
         self.V = self.V.join(unormalU, self.V.id == unormalU.src, 'leftouter').withColumn('P[fraud]', col('Fi[fraud]')*col('P[fraud]')) \
                                                                             .withColumn('P[honest]', col('Fi[honest]')*col('P[honest]'))
-        self.V = self.colNormaliser(self.V, [('P[fraud]', 'fFac'), ('P[honest]', 'hFac')])
+        # self.V = self.colNormaliser(self.V, [('P[fraud]', 'fFac'), ('P[honest]', 'hFac')])
         self.V = self.rowNormaliser(self.V, ['P[fraud]', 'P[honest]'])
 
-        unormalP = self.MUL(self.E, 'dst', [('Mji[bad]', 'P[bad]'), ('Mji[good]', 'P[good]')])
-        if not 'P[bad]' in clms:
-            clms.extend(['P[fraud]', 'P[honest]', 'P[bad]', 'P[good]', 'fFac', 'hFac', 'bFac', 'gFac'])
+        unormalP = self.MUL(self.getEdges('dst'), 'dst', [('Mji[bad]', 'P[bad]'), ('Mji[good]', 'P[good]')])
+        # if not 'P[bad]' in clms:
+        #     clms.extend(['P[fraud]', 'P[honest]', 'P[bad]', 'P[good]', 'fFac', 'hFac', 'bFac', 'gFac'])
 
         self.V = self.V.join(unormalP, self.V.id == unormalP.dst, 'leftouter').withColumn('P[bad]', col('Fi[bad]')*col('P[bad]')) \
                                                                             .withColumn('P[good]', col('Fi[good]')*col('P[good]'))     
-        self.V = self.colNormaliser(self.V, [('P[bad]', 'bFac'), ('P[good]', 'gFac')])                                        
+        # self.V = self.colNormaliser(self.V, [('P[bad]', 'bFac'), ('P[good]', 'gFac')])  
+        clms.extend(['P[fraud]', 'P[honest]', 'P[bad]', 'P[good]'])                                      
         self.V = self.rowNormaliser(self.V, ['P[bad]', 'P[good]']).select(clms)
 
         
@@ -283,46 +286,43 @@ def firstRun():
     print('\n\n\n\n\n')
     # m.E.filter(m.E.src == 'A71Z5AIGEFK11').show()
 
-def messagePassing(iteration):
-    V = spark.read.parquet('../data/videoGames_VerticesLBP.parquet')
-    E = spark.read.parquet('../data/videoGames_EdgesLBP.parquet')
+def messagePassing(iteration, maxDeg=None, sampleSize=None, signMagEffect=True, vPath=None, ePath=None, rPath=None):
+    if ePath is None:
+        vPath = '../data/videoGames_VerticesLBP.parquet'
+        ePath = '../data/videoGames_EdgesLBP.parquet'
+    if vPath is None:
+        rPath = '../data/MRF/'
+    Path(rPath).mkdir(parents=True, exist_ok=True)
+
+    V = spark.read.parquet(vPath)
+    E = spark.read.parquet(ePath)
     
     # moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
-    m = MRF(V, E)
+    m = MRF(V, E, maxDeg, sampleSize)
     # m.updateFi(moreThan1Review)
 
     for i in range(iteration):
         start_time = time.time()
-        m.u2pMsg()
-        m.p2uMsg()
-        m.E.write.parquet(f'../data/MRF/MRF-E{i}.parquet')
+        m.u2pMsg(signMagEffect)
+        m.p2uMsg(signMagEffect)
+        # m.E.repartition('src', 'dst', 'scu', 'scp', 'uDeg', 'pDeg')
+        m.E.write.parquet(rPath + f'MRF-E{i}.parquet')
         print(f"\n---iteration {i+1} ===> {time.time() - start_time} seconds ---\n")
         del m
         spark.catalog.clearCache()
-        E = spark.read.parquet(f'../data/MRF/MRF-E{i}.parquet')
-        m = MRF(V, E)
+        E = spark.read.parquet(rPath + f'MRF-E{i}.parquet')
+        m = MRF(V, E, maxDeg, sampleSize)
         
 
-def beliefExtraction(iteration):
-    V = spark.read.parquet('../data/videoGames_VerticesLBP.parquet')
-    E = spark.read.parquet(f'../data/MRF/MRF-E0.parquet')
-    # moreThan1Review = spark.read.parquet('../data/videoGames_MoreThan1ReviewAtATime.parquet')
+def beliefExtraction(vPath, ePath, rPath):
+    V = spark.read.parquet(vPath)
+    E = spark.read.parquet(ePath)
     m = MRF(V, E)
-    # m.updateFi(moreThan1Review)
+    start_time = time.time()
+    m.spBelief()
+    m.V.write.parquet(rPath)
+    print(f"\n---Beleifs Extracted ===> {time.time() - start_time} seconds ---\n")
 
-    for i in range(iteration):
-        start_time = time.time()
-        m.spBelief()
-        m.V.write.parquet(f'../data/MRF/MRF-V{i}.parquet')
-
-        del m
-        spark.catalog.clearCache()
-        if i+1 == iteration:
-            break
-        print(f"\n---iteration {i+1} ===> {time.time() - start_time} seconds ---\n")
-        E = spark.read.parquet(f'../data/MRF/MRF-E{i+1}.parquet')
-        V = spark.read.parquet(f'../data/MRF/MRF-V{i}.parquet')
-        m = MRF(V, E)
 
 def convergence(path):
     results = sorted(glob(path))
@@ -339,6 +339,7 @@ def convergence(path):
     return report
 
 def convergencePrint(path):
+    print('in path:', path)
     res = convergence(path)
     for k, v in res.items():
         print(k, ': ', v)
