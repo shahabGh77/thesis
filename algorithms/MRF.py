@@ -286,7 +286,7 @@ def firstRun():
     print('\n\n\n\n\n')
     # m.E.filter(m.E.src == 'A71Z5AIGEFK11').show()
 
-def messagePassing(iteration, maxDeg=None, sampleSize=None, signMagEffect=True, vPath=None, ePath=None, rPath=None):
+def messagePassing(iteration, maxDeg=None, sampleSize=None, startIndex=1, signMagEffect=True, vPath=None, ePath=None, rPath=None):
     if ePath is None:
         vPath = '../data/videoGames_VerticesLBP.parquet'
         ePath = '../data/videoGames_EdgesLBP.parquet'
@@ -301,17 +301,25 @@ def messagePassing(iteration, maxDeg=None, sampleSize=None, signMagEffect=True, 
     m = MRF(V, E, maxDeg, sampleSize)
     # m.updateFi(moreThan1Review)
 
-    for i in range(iteration):
+    for i in range(startIndex, startIndex+iteration):
         start_time = time.time()
         m.u2pMsg(signMagEffect)
         m.p2uMsg(signMagEffect)
-        # m.E.repartition('src', 'dst', 'scu', 'scp', 'uDeg', 'pDeg')
+        print(f"\n---iteration {i} before writing===> {time.time() - start_time} seconds ---\n")
         m.E.write.parquet(rPath + f'MRF-E{i}.parquet')
-        print(f"\n---iteration {i+1} ===> {time.time() - start_time} seconds ---\n")
         del m
         spark.catalog.clearCache()
         E = spark.read.parquet(rPath + f'MRF-E{i}.parquet')
         m = MRF(V, E, maxDeg, sampleSize)
+        print(f"\n---iteration {i} after writing ===> {time.time() - start_time} seconds ---\n")
+    
+    # print('[Writing Final Result]')
+    # start_time = time.time()
+    # m.E.write.parquet(rPath + 'MRF-E_final.parquet')
+    # print(f"\n---final write ===> {time.time() - start_time} seconds ---\n")
+
+
+    
         
 
 def beliefExtraction(vPath, ePath, rPath):
@@ -328,6 +336,7 @@ def convergence(path):
     results = sorted(glob(path))
     report = {'columns': ['Fm', 'Hm', 'Bm', 'Gm']}
     for i, res in enumerate(results):
+        print('reading: ', res)
         e = spark.read.parquet(res)
         d = e.agg(F.sum('Mij[fraud]').alias('F'), F.sum('Mij[honest]').alias('H'),
                     F.sum('Mji[bad]').alias('B'), F.sum('Mji[good]').alias('G')).first().asDict()
