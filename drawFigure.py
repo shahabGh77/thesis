@@ -1,18 +1,33 @@
 from cProfile import label
 from tracemalloc import stop
 from turtle import color
+from cv2 import rotate
 from matplotlib import pyplot as plt
 import numpy as np
 from numpy import genfromtxt
-import matplotlib
+import matplotlib as mpl
+from matplotlib.patches import ConnectionPatch
 
-# matplotlib.use("pgf")
-# matplotlib.rcParams.update({
-#     "pgf.texsystem": "pdflatex",
-#     'font.family': 'serif',
+# mpl.use("pgf")
+# mpl.rcParams.update({
+#     'text.latex.preamble': ['\\usepackage{gensymb}'],
+#     'image.origin': 'lower',
+#     'image.interpolation': 'nearest',
+#     'image.cmap': 'gray',
+#     'axes.grid': False,
+#     'savefig.dpi': 150,  # to adjust notebook inline plot size
+#     'axes.labelsize': 8, # fontsize for x and y labels (was 10)
+#     'axes.titlesize': 8,
+#     'font.size': 8, # was 10
+#     'legend.fontsize': 6, # was 10
+#     'xtick.labelsize': 8,
+#     'ytick.labelsize': 8,
 #     'text.usetex': True,
-#     'pgf.rcfonts': False,
+#     'figure.figsize': [3.39, 2.10],
+#     'font.family': 'serif',
 # })
+
+saveFormat = 'eps'
 
 def set_size(width_pt, fraction=1, subplots=(1, 1)):
     """Set figure dimensions to sit nicely in our document.
@@ -282,12 +297,15 @@ def degDist():
 
     # ax.plot(activity, cat, label="cat")
     ax.legend()
-    plt.savefig('degDist.pgf')
-    # plt.show()
+    # plt.savefig('reports/paper/pics/degDist.pgf')
+    plt.savefig(f'reports/paper/pics/degDist.{saveFormat}')
+    plt.show()
+
 
 def runningTimes():
     fig, ax = plt.subplots()
     iterations = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    M40 = [199, 201, 191, 186, 210, 196, 197, 189, 205, 178]
     M20 = [80, 76, 75, 76, 77, 75, 74, 74, 78, 74]
     M10 = [51, 57, 58, 59, 57, 58, 58, 56, 60, 57]
     M8 = [39, 35, 35, 37, 37, 34, 37, 36, 38, 36]
@@ -295,33 +313,76 @@ def runningTimes():
 
     plt.xlabel('iteration number')
     plt.ylabel('time')
+    # ax.plot(iterations, M40, label="40M")
     ax.plot(iterations, M20, label="20M")
     ax.plot(iterations, M10, label="10M")
     ax.plot(iterations, M8, label="8M")
     ax.plot(iterations, M2_5, label="2.5M")
 
     ax.legend()
-    plt.savefig('runningTimes.pgf')
-    # plt.show()
+    plt.savefig(f'reports/paper/pics/runningTimes.{saveFormat}')
+    plt.show()
+    # plt.savefig('runningTimes.pgf')
+    
 
 def runningTime2():
     fig, ax = plt.subplots()
-    numberOfEdges = [2.5, 8, 10, 20]
-    rTime = [14.3, 36.4, 57.1, 75.9]
-    plt.xlabel('number of edges')
-    plt.ylabel('time')
+    numberOfEdges = [0.1, 2.5, 8, 10, 20, 40]
 
-    ax.plot(numberOfEdges, rTime)
+    rTime = [0.493, 14.3, 36.4, 57.1, 75.9, 195.2]
+    plt.xlabel('Number of edges(Million)')
+    plt.ylabel('Time per iteration(sec)')
 
+    ax.plot(numberOfEdges, rTime, label='Our work')
+    ax.plot(np.array(numberOfEdges), np.array(numberOfEdges)*100, label='Akoglu et al.')
+    plt.plot(1.15, 120, 'C1o')
+    plt.plot(40, 4000, 'C1o')
+    plt.plot(20, 75.9, 'C0o')
+    plt.plot(40, 195.2, 'C0o')
+
+    ax.annotate(
+        '1.15M edges,\nin 120s',
+        xy=(1.15, 120), xycoords='data',
+        xytext=(+30, 90), textcoords='offset points',
+        bbox=dict(boxstyle="round", fc="0.8"),
+        arrowprops=dict(arrowstyle="->",
+                        connectionstyle="angle,angleA=0,angleB=90,rad=10"))
+
+    ax.annotate(
+        '20M edges,\nin 75.9s',
+        xy=(20, 75.9), xycoords='data',
+        xytext=(+10, 30), textcoords='offset points',
+        bbox=dict(boxstyle="round", fc="0.8"),
+        arrowprops=dict(arrowstyle="->",
+                        connectionstyle="angle,angleA=0,angleB=90,rad=10"))
+
+    ax.annotate(
+        '40M edges,\nin 195.2s',
+        xy=(40, 195.2), xycoords='data',
+        xytext=(-80, 120), textcoords='offset points',
+        bbox=dict(boxstyle="round", fc="0.8"),
+        arrowprops=dict(arrowstyle="->",
+                        connectionstyle="angle,angleA=0,angleB=90,rad=10"))
+
+    ax.annotate(
+        '40M edges,\nin 4000s',
+        xy=(40, 4000), xycoords='data',
+        xytext=(-130, -40), textcoords='offset points',
+        bbox=dict(boxstyle="round", fc="0.8"),
+        arrowprops=dict(arrowstyle="->",
+                        connectionstyle="angle,angleA=90,angleB=0,rad=10"))
+    # ax.text(1.15, 120, 120, size=12)
     ax.legend()
-    plt.savefig('runningTimes2.pgf')
-    # plt.show()
+    # plt.savefig('reports/paper/pics/runningTimes2.pgf')
+    plt.savefig(f'reports/paper/pics/runningTimes2.{saveFormat}')
+    plt.show()
+
 
 def convergenceOne():
     #for electronics 20M
     fig, ax = plt.subplots()
 
-    plt.xlabel('interval', labelpad=-48)
+    plt.xlabel('iteration i, i+1', labelpad=-48)
     plt.ylabel('change')
     plt.yscale('symlog')
 
@@ -331,10 +392,12 @@ def convergenceOne():
     # ax.plot(iterationLabel(1, 120), A40[:, 3], label="good-messages")
     ax.axhline(y=0, linestyle='dotted', color='k', label='convergence')
 
-    plt.xticks(ax.get_xticks()[::5], rotation=90, fontsize='x-small')
+    plt.xticks(ax.get_xticks()[::5], rotation=80, fontsize='x-small')
     ax.legend()
-    plt.savefig('reports/paper/pics/convergenceOne.pgf')
-    # plt.show()
+    # plt.savefig('reports/paper/pics/convergenceOne.pgf')
+    plt.savefig(f'reports/paper/pics/convergenceOne.{saveFormat}')
+    plt.show()
+
 
 
 
@@ -342,7 +405,8 @@ def convergenceAll():
     fig, ax = plt.subplots()
     
 
-    plt.xlabel('iteration number')
+    plt.xlabel('iteration i, i+1')
+    ax.xaxis.set_label_coords(0.2, 0.06)
     plt.ylabel('change of productToUser messages')
     plt.yscale('symlog')
 
@@ -353,20 +417,22 @@ def convergenceAll():
     ax.axhline(y=0, linestyle='dotted', color='k', label='convergence')
     ax.legend()
     plt.xticks(rotation = 80)
-    plt.savefig('reports/paper/pics/convergenceAll.pgf')
-    # plt.show()
+    # plt.savefig('reports/paper/pics/convergenceAll.pgf')
+    plt.savefig(f'reports/paper/pics/convergenceAll.{saveFormat}')
+    plt.show()
+
 
 
 def deviationRange():
     fig, ax = plt.subplots()
-    iterations = ['2_1', '3_2', '4_3', '5_4', '6_5', '7_6', '8_7', '9_8', '10_9']
-    # iterations = ['2_1', '3_2', '4_3', '5_4', '6_5', '7_6', '8_7', '9_8', '10_9',
-    #               '11_10', '12_11', '13_12', '14_13', '15_14', '16_15', '17_16',
-    #               '18_17', '19_18', '20_19', '21_20', '22_21', '23_22']
+    # iterations = ['2_1', '3_2', '4_3', '5_4', '6_5', '7_6', '8_7', '9_8', '10_9']
+    iterations = ['2_1', '3_2', '4_3', '5_4', '6_5', '7_6', '8_7', '9_8', '10_9',
+                  '11_10', '12_11', '13_12', '14_13', '15_14', '16_15', '17_16',
+                  '18_17', '19_18', '20_19', '21_20', '22_21', '23_22']
     # ax2 = ax.twinx()
     # plt.style.use('fivethirtyeight')
-    plt.xlabel('range of difference between sum(productToUser_messages) in iteration i+1, i ')
-    plt.ylabel('range of difference between sum(userToProduct messages) in iteration i+1, i ')
+    plt.xlabel('range of difference between sum(productToUser_messages) \n in iteration i+1 and i ')
+    plt.ylabel('range of difference between sum(userToProduct messages) \n in iteration i+1 and i ')
 
 
     # plt.xlabel('Honest', loc='left')
@@ -389,21 +455,23 @@ def deviationRange():
 
     # [176979.7266862318, -176979.72671467625, 2794319.623128539, -2794319.6230830867]
     # print(len(A40))
-    for i, itr in enumerate(C20):
-        # print(i)
+    for i, itr in enumerate(C20[:10]):
+        print(i)
         ax.plot([itr[0], 0, itr[1], 0, itr[0]], [0, itr[2], 0, itr[3], 0], label=iterations[i])
         # break
     # for i, txt in enumerate(iterations):
     #     ax.annotate(txt, (C20[:, 0][i], C20[:, 1][i]))
     ax.legend()
-    plt.savefig('deviationRange.pgf')
-    # plt.show()
+    # plt.savefig('deviationRange.pgf')
+    plt.tight_layout()
+    plt.savefig(f'reports/paper/pics/deviationRange.{saveFormat}')
+    plt.show()
 
 def circleConvergenge():
     fig, ax = plt.subplots()
     # plt.scatter( 0 , 0 , s = 7000 )
     # plt.title( 'Circle' )
-    iterations = ['2_1', '3_2', '4_3', '5_4', '6_5', '7_6', '8_7', '9_8', '10_9']
+    # iterations = ['2_1', '3_2', '4_3', '5_4', '6_5', '7_6', '8_7', '9_8', '10_9']
     
     # plt.xlim( -0.85 , 0.85 )
     # plt.ylim( -0.95 , 0.95 )
@@ -422,19 +490,227 @@ def circleConvergenge():
         ax.plot( radius * np.cos( theta ), radius * np.sin( theta ) , label=iterations[i])
     ax.set_aspect( 1 )
     ax.legend()
-    plt.savefig('circleConvergenge.pgf')
-    # plt.show()
+    # plt.savefig('circleConvergenge.pgf')
+    plt.savefig(f'reports/paper/pics/circleConvergenge.{saveFormat}')
+    plt.show()
 
 
     # plt.show()
+
+
+def fraudDist():
+    fig, ax = plt.subplots()
+    ax.bar(np.linspace(0,1,11)-.02, [1055156, 133115, 80165, 94441, 21168, 20125, 210746, 16851, 26218, 53934, 98247], .05) #c
+    ax.bar(np.linspace(0,1,11)-.01, [264191, 18537, 6901, 16064, 2871, 1914, 39046, 1816, 3870, 7024, 18328], .04) #v
+    ax.bar(np.linspace(0,1,11)+.01, [2357213, 193199, 75287, 164737, 32869, 17359, 344650, 18186, 45389, 78299, 183248], .03) #e
+    ax.bar(np.linspace(0,1,11)+.02, [935216, 92417, 57486, 49006, 10789, 13242, 96786, 8530, 11620, 23065, 41079], .02) #t
+    plt.show()
+
+
+def catgDist():
+    fig, ax = plt.subplots()
+
+    size = 0.3
+    #                   fraud, honest         good, bad
+    vals = np.array([[3740186, 12725302], [1781657, 261080]])
+
+    cmap = plt.get_cmap('tab20c')
+    outer_colors = cmap(np.arange(3)*4)
+    grp_names = ['Users\n 89%', 'Products\n    11%']
+    subgrp_names = ['Fruadster', 'Honest', "Good", 'Bad']
+    inner_colors = cmap([1, 2, 5, 6, 9, 10])
+    
+    wedges, texts = ax.pie(vals.flatten(), radius=1, colors=inner_colors, labels=['22%', '78%', '87%', '13%'], labeldistance=0.8,
+        wedgeprops=dict(width=size, edgecolor='w'))
+
+    bbox_props = dict(boxstyle="square,pad=0.3", fc="w", ec="k", lw=0.72)
+    kw = dict(arrowprops=dict(arrowstyle="-"),
+            bbox=bbox_props, zorder=0, va="center")
+
+    for i, p in enumerate(wedges):
+        ang = (p.theta2 - p.theta1)/2. + p.theta1
+        y = np.sin(np.deg2rad(ang))
+        x = np.cos(np.deg2rad(ang))
+        horizontalalignment = {-1: "right", 1: "left"}[int(np.sign(x))]
+        connectionstyle = "angle,angleA=0,angleB={}".format(ang)
+        kw["arrowprops"].update({"connectionstyle": connectionstyle})
+        ax.annotate(subgrp_names[i], xy=(x, y), xytext=(1.35*np.sign(x), 1.4*y),
+                    horizontalalignment=horizontalalignment, **kw)
+
+    ax.pie(vals.sum(axis=1), radius=1-size, colors=outer_colors, labels=grp_names, labeldistance=0.615, textprops={'fontsize': 8.5, 'color': 'w'},
+        wedgeprops=dict(width=size, edgecolor='w'))
+
+    # plt.legend(loc=(0.9, 0.1))
+    # handles, labels = ax.get_legend_handles_labels()
+    # subgroup_names_legs = ['Users:Fruadster', 'Users:Honest', 'Products:Bad', 'Products:Good']
+    # ax.legend(handles, subgroup_names_legs, loc=(0.9, 0.1))
+    plt.text(0, 0, "ٔNodes", ha='center', va='center', fontsize=12)
+    plt.tight_layout()
+    # plt.savefig('reports/paper/pics/nodesDist.pgf')
+    plt.savefig(f'reports/paper/pics/nodesDist.{saveFormat}')
+    plt.show()
+
+
+def survey(results, category_names):
+        """
+        Parameters
+        ----------
+        results : dict
+            A mapping from question labels to a list of answers per category.
+            It is assumed all lists contain the same number of entries and that
+            it matches the length of *category_names*.
+        category_names : list of str
+            The category labels.
+        """
+        labels = list(results.keys())
+        data = np.array(list(results.values()))
+        data_cum = data.cumsum(axis=1)
+        cmap = plt.get_cmap('RdYlGn')
+        category_colors = cmap(
+            np.linspace(0.15, 0.85, data.shape[1]))
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.invert_yaxis()
+        ax.xaxis.set_visible(False)
+        ax.set_xlim(0, np.sum(data, axis=1).max())
+        
+
+        for i, (colname, color) in enumerate(zip(category_names, category_colors)):
+            widths = data[:, i]
+            starts = data_cum[:, i] - widths
+            rects = ax.barh(labels, widths, left=starts, height=0.5,
+                            label=colname, color=color)
+
+            r, g, b, _ = color
+            text_color = 'white' if r * g * b < 0.5 else 'darkgrey'
+            ax.bar_label(rects, label_type='center', color=text_color)
+        ax.legend(ncol=len(category_names), bbox_to_anchor=(0, 1),
+                loc='lower left', fontsize='small')
+
+        return fig, ax
+
+def _plotReviewDist(results, cmap, labels, saveLoc):
+    category_names = ['Fake', 'Uncertain', 'Genuine']
+    fig, ax = survey(results, category_names)
+
+    cbar = fig.colorbar(mpl.cm.ScalarMappable(cmap=cmap), ticks=[1, 0], pad=0.18, location = 'left', ax=ax)
+    cbar.ax.set_yticklabels(labels, fontsize='small')
+
+
+    plt.tight_layout()
+    plt.savefig(saveLoc)
+    plt.show()
+
+def reviewDist():
+    #honest users
+    results = {'0.9 ≤ honest ≤ 1.0': [0.0, 1.0, 99.0], '0.8 ≤ honest < 0.9': [0.0, 9.0, 91.0],
+     '0.7 ≤ honest < 0.8': [22.0, 17.0, 61.0], '0.6 ≤ honest < 0.7': [15.0, 35.0, 50.0], 
+     '0.5 ≤ honest < 0.6': [24.0, 27.0, 49.0], '0.4 ≤ honest < 0.5': [38.0, 21.0, 41.0], 
+     '0.3 ≤ honest < 0.4': [49.0, 5.0, 46.0], '0.2 ≤ honest < 0.3': [53.0, 16.0, 31.0], 
+     '0.1 ≤ honest < 0.2': [89.0, 11.0, 0.0], '0.0 ≤ honest < 0.1': [94.0, 1.0, 5.0]}
+    labels = ['The most \nhonest user', 'The least \nhonest user']
+    cmap = 'Greens'
+    # saveLoc = 'reports/paper/pics/honestReviewFreq.pgf'
+    saveLoc = f'reports/paper/pics/honestReviewFreq.{saveFormat}'
+
+    # saveLoc = 'honestReviewFreq.png'
+    _plotReviewDist(results, cmap, labels, saveLoc)
+
+    #bad products
+    results = {'0.9 ≤ bad ≤ 1.0': [16.0, 16.0, 68.0], '0.8 ≤ bad < 0.9': [10.0, 27.0, 63.0],
+    '0.7 ≤ bad < 0.8': [18.0, 54.0, 28.0], '0.6 ≤ bad < 0.7': [24.0, 33.0, 43.0],
+    '0.5 ≤ bad < 0.6': [9.0, 73.0, 18.0], '0.4 ≤ bad < 0.5': [17.0, 39.0, 44.0],
+    '0.3 ≤ bad < 0.4': [20.0, 33.0, 47.0], '0.2 ≤ bad < 0.3': [11.0, 59.0, 30.0], 
+    '0.1 ≤ bad < 0.2': [4.0, 24.0, 72.0], '0.0 ≤ bad < 0.1': [13.0, 2.0, 85.0]}
+    labels = ['The Worst product', 'The best product']
+    cmap = 'Reds'
+    # saveLoc = 'reports/paper/pics/badReviewFreq.pgf'
+    saveLoc = f'reports/paper/pics/badReviewFreq.{saveFormat}'
+
+    # saveLoc = 'badReviewFreq.png'
+    _plotReviewDist(results, cmap, labels, saveLoc)
+
+def reviewDist2():
+    # Pie chart, where the slices will be ordered and plotted counter-clockwise:
+    # labels = 'Fake', 'Uncertain', 'Genuine' 
+    # sizes = [13, 4, 83]
+    cmap = plt.get_cmap('RdYlGn')
+    colour = cmap(np.linspace(0.11, 0.89, 3))
+
+    # fig1, ax1 = plt.subplots()
+    # ax1.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=colour)
+    # ax1.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+
+
+
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 5))
+    fig.subplots_adjust(wspace=0)
+
+    # pie chart parameters
+    overall_ratios = [.13, .04, .83]
+    labels = ['Fake', 'Uncertain', 'Genuine']
+    explode = [0, 0.1, 0]
+    # rotate so that first wedge is split by the x-axis
+    wedges, *_ = ax1.pie(overall_ratios, autopct='%1.1f%%', startangle=-60,
+                        labels=labels, explode=explode, colors=colour)
+
+    age_ratios = [.72, .13, .06, .09]
+    age_labels = ['singleton users', 'singleton products', 'singletone users and products', 'others']
+    bottom = 1
+    width = .2
+
+    # Adding from the top matches the legend.
+    for j, (height, label) in enumerate(reversed([*zip(age_ratios, age_labels)])):
+        bottom -= height
+        bc = ax2.bar(0, height, width, bottom=bottom, color='C8', label=label,
+                    alpha=0.1 + 0.25 * j)
+        ax2.bar_label(bc, labels=[f"{height:.0%}"], label_type='center')
+
+    ax2.set_title("node's status")
+    ax2.legend(loc=9, bbox_to_anchor=(-0.1, 1.15))
+    ax2.axis('off')
+    ax2.set_xlim(- 2.5 * width, 2.5 * width)
+
+    # use ConnectionPatch to draw lines between the two plots
+    theta1, theta2 = wedges[1].theta1, wedges[1].theta2
+    center, r = wedges[1].center, wedges[1].r
+    bar_height = sum(age_ratios)
+
+    # draw top connecting line
+    x = r * np.cos(np.pi / 180 * theta2) + center[0]
+    y = r * np.sin(np.pi / 180 * theta2) + center[1]
+    con = ConnectionPatch(xyA=(-width / 2, bar_height), coordsA=ax2.transData,
+                        xyB=(x, y), coordsB=ax1.transData)
+    con.set_color([0, 0, 0])
+    con.set_linewidth(4)
+    ax2.add_artist(con)
+
+    # draw bottom connecting line
+    x = r * np.cos(np.pi / 180 * theta1) + center[0]
+    y = r * np.sin(np.pi / 180 * theta1) + center[1]
+    con = ConnectionPatch(xyA=(-width / 2, 0), coordsA=ax2.transData,
+                        xyB=(x, y), coordsB=ax1.transData)
+    con.set_color([0, 0, 0])
+    ax2.add_artist(con)
+    con.set_linewidth(4)
+    # plt.tight_layout()
+    # plt.savefig('reports/paper/pics/reviewDist2.pgf')
+    plt.savefig(f'reports/paper/pics/reviewDist2.{saveFormat}')
+
+    plt.show()
 
 
 if __name__ == '__main__':
-    # degDist() 
-    # runningTimes()
-    # runningTime2()
-    # convergenceAll()
+    degDist() 
+    runningTimes()
+    runningTime2()
+    convergenceAll()
     convergenceOne()
-    # deviationRange()
-    # circleConvergenge()
-    # print(iterationLabel(1, 10))
+    fraudDist()
+    deviationRange()
+    circleConvergenge()
+    print(iterationLabel(1, 10))
+    catgDist()
+    reviewDist()
+    reviewDist2()

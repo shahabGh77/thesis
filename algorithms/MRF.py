@@ -319,7 +319,8 @@ def messagePassing(iteration, maxDeg=None, sampleSize=None, startIndex=1, signMa
     # print(f"\n---final write ===> {time.time() - start_time} seconds ---\n")
 
 
-    
+def addSingletoneBelief():
+    pass    
         
 
 def beliefExtraction(vPath, ePath, rPath):
